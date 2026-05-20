@@ -9,6 +9,6 @@ public class DemoRestController {
 
     @GetMapping(value = "/msg")
     public String getMessage() {
-        return "Welcome";
+        return "Welcome Uma!!";
     }
 }
