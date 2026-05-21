@@ -1,6 +1,8 @@
 package org.example.configuration;
 
 import lombok.SneakyThrows;
+import org.h2.server.web.JakartaWebServlet;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -30,7 +32,7 @@ public class AppConfig {
         // Spring Security evaluates these rules from top to bottom (most specific to most general).
         httpSecurity.authorizeHttpRequests(httpReq -> httpReq
                 // Allows completely unrestricted access to the "/contact" endpoint (no login required)
-                .requestMatchers("/contact").permitAll()
+                .requestMatchers("/contact", "/user", "/h2-console/**").permitAll()
 
                 // Forces ALL other endpoints not matched above to require successful authentication
                 .anyRequest().authenticated()
@@ -45,6 +47,14 @@ public class AppConfig {
         // This automatically generates a default, user-friendly HTML login page at "/login"
         // and handles the submission of login credentials via a POST request.
         httpSecurity.formLogin(Customizer.withDefaults());
+
+        // 4. CRITICAL: Disable CSRF protection specifically for the H2 console
+        // This allows the H2 console to make connection POST requests successfully.
+        httpSecurity.csrf(csrf -> csrf.ignoringRequestMatchers("/h2-console/**"));
+
+        // 5. CRITICAL: Allow iframes from the same origin
+        // This switches headers from 'DENY' to 'SAMEORIGIN' so the H2 console UI can render its frames.
+        httpSecurity.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
 
         // Finalize, compile, and return the configured security filter chain object
         return httpSecurity.build();
@@ -118,5 +128,18 @@ public class AppConfig {
 
         // Initializes the memory-based registry containing our pre-defined collection of users
         return new InMemoryUserDetailsManager(u1, u2, u3);
+    }
+
+    @Bean
+    public ServletRegistrationBean<JakartaWebServlet> h2ConsoleServletRegistration() {
+        // 1. Instantiates H2's web console engine (JakartaWebServlet)
+        // 2. Binds it directly to the URL pathway "/h2-console/*" inside Tomcat
+        ServletRegistrationBean<JakartaWebServlet> registration =
+                new ServletRegistrationBean<>(new JakartaWebServlet(), "/h2-console/*");
+
+        // 3. Names the servlet instance so Spring MVC doesn't confuse it with other controllers
+        registration.setName("h2-console");
+
+        return registration;
     }
 }
