@@ -5,6 +5,9 @@ import org.example.service.UserServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,7 +36,49 @@ public class UserController {
      * practice to inject the Interface (UserService) to maintain low coupling and support mocking in unit tests.
      */
     @Autowired
-    UserServiceImpl userService;
+    public UserServiceImpl userService;
+
+    /**
+     * @Autowired - Injects the centralized Spring Security execution coordinator.
+     * This bean is defined in your AppConfig class. It serves as the primary gateway
+     * to manually pass user-submitted credentials directly into Spring Security's validation engine.
+     */
+    @Autowired
+    public AuthenticationManager authenticationManager;
+
+    /**
+     * @PostMapping - Specialized mapping that routes HTTP POST requests hitting "/user/login" to this method.
+     * * PROGRAMMATIC AUTHENTICATION FLOW:
+     * 1. Token Packaging: Takes the raw username/password from the request body and encapsulates them
+     * inside an unauthenticated UsernamePasswordAuthenticationToken instance.
+     * 2. Processing Delegation: The unauthenticated token is passed directly to the authenticationManager.authenticate() method.
+     * The manager routes it to your registered DaoAuthenticationProvider, which loads the true user record from storage via
+     * your UserDetailsService, computes and validates the hashed password, and returns a fully authorized Authentication token.
+     * 3. Result Inspection: If authentication fails, Spring Security normally throws an internal exception (e.g., BadCredentialsException).
+     * If it passes, the returned object yields true for '.isAuthenticated()', indicating a successful user session verification.
+     */
+    @PostMapping(value = "/login")
+    public ResponseEntity<String> login(@RequestBody UserEntity userEntity) {
+
+        // Step 1: Wrap raw incoming client credentials into an unauthenticated security wrapper object
+        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(
+                userEntity.getEmail(),
+                userEntity.getPassword()
+        );
+
+        // Step 2: Push the wrapper token through the security ecosystem for deep password/identity validation
+        Authentication authenticate = authenticationManager.authenticate(token);
+
+        // Step 3: Evaluate the validation response and hand back an appropriate status statement
+        if (authenticate.isAuthenticated()) {
+            return new ResponseEntity<>("Authentication is successful ", HttpStatus.OK);
+        } else {
+            // Note: If bad credentials are sent, Spring usually throws an exception before reaching here,
+            // but this serves as a fallback structural check. HttpStatus.UNAUTHORIZED (401) is traditionally
+            // used rather than NOT_FOUND (404) for structural authentication failures.
+            return new ResponseEntity<>("Authentication failed ", HttpStatus.NOT_FOUND);
+        }
+    }
 
     /**
      * @PostMapping - A specialized shortcut variant of {@code @RequestMapping(method = RequestMethod.POST)}.

@@ -1,9 +1,9 @@
 package org.example.service;
 
 import org.example.UserEntity;
-import org.example.UserRepository;
+import org.example.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 /**
@@ -15,6 +15,10 @@ import org.springframework.stereotype.Service;
  * It registers this class as a managed bean within the Spring Application Context.
  * The Service layer is where core business rules, validations, transactions, and
  * data transformations live before committing changes to the database.
+ * * LAYER BOUNDARY ROLE: Acts as the secure mediator between the incoming transport
+ * layer (UserController) and the storage infrastructure (UserRepository). It serves
+ * as the absolute last line of defense for processing raw credentials before they are
+ * committed to permanent disk storage.
  * * DESIGN BEST PRACTICE: This class implements the 'UserService' interface.
  * Programming to interfaces ensures loose coupling, follows the Dependency Inversion
  * Principle, and simplifies mock testing.
@@ -35,13 +39,23 @@ public class UserServiceImpl implements UserService {
      * Spring scans its Application Context container, locates the single active
      * bean matching the type 'PasswordEncoder' (defined as a BCryptPasswordEncoder
      * in your AppConfig class), and injects it here.
+     * * ARCHITECTURAL SIGNIFICANCE: Decoupling the encoder implementation via the
+     * interface type ensures that if the system migration dictates moving from BCrypt
+     * to Argon2 or PBKDF2 in the future, this business layer remains completely untouched.
      */
     @Autowired
-    public PasswordEncoder encoder;
+    public BCryptPasswordEncoder encoder;
 
     /**
+     * ==============================================================================
+     * CORE USER REGISTRATION PIPELINE (CREDENTIAL SANITIZATION)
+     * ==============================================================================
      * Overrides the contract method from the UserService interface to cleanly
      * execute business rules and persist user records.
+     * * * THE MULTI-STEP MUTATION FLOW:
+     * 1. Interception: Takes the raw domain payload directly from the web layer.
+     * 2. Scrambling: Runs the plain-text credentials through the injected hashing engine.
+     * 3. Sync: Sanitizes the internal state of the entity prior to storage dispatch.
      * * @param userEntity - The un-saved data payload passed down from the Controller layer,
      * which initially contains a plain-text password.
      *

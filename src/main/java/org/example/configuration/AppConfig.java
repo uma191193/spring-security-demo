@@ -1,9 +1,13 @@
 package org.example.configuration;
 
 import lombok.SneakyThrows;
+import org.example.service.UserDetailsServiceImpl;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.User;
@@ -56,7 +60,7 @@ public class AppConfig {
         // Spring Security processes these rules sequentially from TOP to BOTTOM.
         httpSecurity.authorizeHttpRequests(httpReq -> httpReq
                 // White-list: Anyone can hit the "/contact" endpoint without logging in.
-                .requestMatchers("/contact").permitAll()
+                .requestMatchers("/contact", "/user/login").permitAll()
 
                 // Black-list/Secure-all: EVERY other endpoint path requires a
                 // successfully authenticated user session or token.
@@ -84,7 +88,7 @@ public class AppConfig {
 
     /**
      * ==============================================================================
-     * 2. THE CRYPTOGRAPHIC PASSING ENCODER (THE CRYPTO ENGINE)
+     * 2. THE CRYPTOGRAPHIC PASSWORD ENCODER (THE CRYPTO ENGINE)
      * ==============================================================================
      * Defines how user credentials will be scrambled and verified.
      * * Return Type: We return the generic interface 'PasswordEncoder'. This ensures
@@ -95,13 +99,29 @@ public class AppConfig {
      * each password, neutralizing pre-computed lookups (like rainbow table attacks).
      */
     @Bean
-    public PasswordEncoder passwordEncoder() {
+    public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
     /**
      * ==============================================================================
-     * 3. IN-MEMORY USER CREDITENTIAL REGISTRY (THE DATA STORE)
+     * 3. CUSTOM USER DETAILS SERVICE (THE DATABASE IDENTITY BRIDGE)
+     * ==============================================================================
+     * Registers your custom application-specific user loading strategy as a managed bean.
+     * * Role: This acts as the central adapter bridging your persistent data layer (e.g., MySQL via JPA)
+     * with Spring Security's infrastructure.
+     * * Underlying Mechanism: When someone attempts logging in, this component will intercept the
+     * target username, execute a database search, and wrap your domain User entity inside a Spring
+     * compliant 'UserDetails' object.
+     */
+    @Bean
+    public UserDetailsServiceImpl userDetailsService() {
+        return new UserDetailsServiceImpl();
+    }
+
+    /**
+     * ==============================================================================
+     * 4. IN-MEMORY USER CREDENTIAL REGISTRY (THE MOCK DATA STORE)
      * ==============================================================================
      * Creates an instance of InMemoryUserDetailsManager which implements UserDetailsService.
      * This acts as a localized mock database inside the computer's volatile RAM.
@@ -147,5 +167,44 @@ public class AppConfig {
 
         // Feeds the user credentials directly into Spring's active runtime memory layer
         return new InMemoryUserDetailsManager(u1, u2, u3);
+    }
+
+    /**
+     * ==============================================================================
+     * 5. DATA ACCESS OBJECT AUTHENTICATION PROVIDER (THE VALIDATION ENGINE)
+     * ==============================================================================
+     * The processing core where credential inspection actually happens.
+     * * Framework Requirement (v7.0+): Uses a mandatory parameterized constructor to force
+     * the inclusion of a valid UserDetailsService at creation time.
+     * * Coordination Role: This component takes the raw username/password provided by the user,
+     * requests your 'userDetailsService()' to pull down the registered profile from storage, and then
+     * delegates to 'passwordEncoder()' to cross-check if the submitted credentials match the database hash.
+     */
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+
+        DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider(userDetailsService());
+
+        authenticationProvider.setPasswordEncoder(passwordEncoder());
+
+        return authenticationProvider;
+    }
+
+    /**
+     * ==============================================================================
+     * 6. THE AUTHENTICATION MANAGER (THE CENTRAL COMMAND SYSTEM)
+     * ==============================================================================
+     * The primary public interface exposed to your application controllers or filters for
+     * processing authentication requests.
+     * * Delegation Strategy: The AuthenticationManager doesn't perform checks directly. Instead,
+     * it behaves like a conductor, passing incoming authentication tokens across a list of configured
+     * Providers (such as your DaoAuthenticationProvider above) until one successfully validates the user.
+     * * AuthenticationConfiguration: A built-in helper utility where Spring aggregates global
+     * system configurations to construct a unified runtime manager instance safely.
+     */
+    @Bean
+    @SneakyThrows
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) {
+        return authenticationConfiguration.getAuthenticationManager();
     }
 }
