@@ -1,8 +1,6 @@
 package org.example.configuration;
 
 import lombok.SneakyThrows;
-import org.h2.server.web.JakartaWebServlet;
-import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -11,103 +9,124 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
-@Configuration // Marks this class as a source of bean definitions for the Spring context
-@EnableWebSecurity // Enables Spring Security's web security support and integrates it with Spring MVC
+/**
+ * ==============================================================================
+ * ARCHITECTURAL LAYER: SECURITY CONFIGURATION
+ * ==============================================================================
+ *
+ * @Configuration: Tells Spring that this class contains one or more bean definition
+ * methods. The Spring container processes this class to generate and manage those
+ * beans within the Application Context.
+ * * @EnableWebSecurity: Switches off Spring Boot's default autoconfigured security rules
+ * and instructs Spring to apply the custom web security filters defined inside this class.
+ */
+@Configuration
+@EnableWebSecurity
 public class AppConfig {
 
     /**
-     * Configures the SecurityFilterChain bean.
-     * This bean defines the filter chain that every incoming HTTP request must pass through.
-     * * @SneakyThrows is a Lombok annotation that implicitly sneaks checked exceptions
-     * (like Exception thrown by httpSecurity methods) out of the method without requiring a throws clause.
+     * ==============================================================================
+     * 1. THE SECURITY FILTER CHAIN (THE GATEKEEPER)
+     * ==============================================================================
+     * This bean defines the series of servlet filters that intercept every single
+     * incoming HTTP request before it can ever reach your RestControllers.
+     * * @SneakyThrows: A Lombok annotation that removes the boilerplate of catching or
+     * declaring checked exceptions (like Exception) thrown by HttpSecurity configuration methods.
      */
     @Bean
     @SneakyThrows
     public SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity) throws Exception {
 
-        // 1. Configure URL-based Authorization Rules
-        // Spring Security evaluates these rules from top to bottom (most specific to most general).
-        httpSecurity.authorizeHttpRequests(httpReq -> httpReq
-                // Allows completely unrestricted access to the "/contact" endpoint (no login required)
-                .requestMatchers("/contact", "/user", "/h2-console/**").permitAll()
+        // -------------------------------------------------------------------------
+        // RULE A: DISABLE CSRF (Cross-Site Request Forgery)
+        // -------------------------------------------------------------------------
+        // By default, Spring Security protects against CSRF attacks by requiring a token
+        // on all mutating requests (POST, PUT, DELETE). Since stateless REST APIs
+        // (like those tested via Postman) do not use session cookies or web browsers
+        // the same way traditional web apps do, we disable CSRF to allow POST requests.
+        httpSecurity.csrf(csrf -> csrf.disable());
 
-                // Forces ALL other endpoints not matched above to require successful authentication
+        // -------------------------------------------------------------------------
+        // RULE B: CONFIGURE URL AUTHORIZATION (WHO CAN ACCESS WHAT)
+        // -------------------------------------------------------------------------
+        // Spring Security processes these rules sequentially from TOP to BOTTOM.
+        httpSecurity.authorizeHttpRequests(httpReq -> httpReq
+                // White-list: Anyone can hit the "/contact" endpoint without logging in.
+                .requestMatchers("/contact").permitAll()
+
+                // Black-list/Secure-all: EVERY other endpoint path requires a
+                // successfully authenticated user session or token.
                 .anyRequest().authenticated()
         );
 
-        // 2. Enable HTTP Basic Authentication
-        // This prompts the browser/client for a standard username/password via an HTTP header (Authorization: Basic ...).
-        // Customizer.withDefaults() uses the out-of-the-box Spring Security default configurations.
+        // -------------------------------------------------------------------------
+        // RULE C: ENABLE HTTP BASIC AUTHENTICATION (FOR APIs / POSTMAN)
+        // -------------------------------------------------------------------------
+        // This activates the BasicAuthenticationFilter. It looks for a header named:
+        // "Authorization: Basic <Base64-encoded-username-and-password>"
+        // If present, it decodes and attempts authentication. Perfect for automated tools.
         httpSecurity.httpBasic(Customizer.withDefaults());
 
-        // 3. Enable Form-Based Login Authentication
-        // This automatically generates a default, user-friendly HTML login page at "/login"
-        // and handles the submission of login credentials via a POST request.
+        // -------------------------------------------------------------------------
+        // RULE D: ENABLE FORM-BASED LOGIN (FOR WEB BROWSERS)
+        // -------------------------------------------------------------------------
+        // This instructs Spring Security to automatically generate a default, clean
+        // HTML login UI at the "/login" URI path and handle login submissions out-of-the-box.
         httpSecurity.formLogin(Customizer.withDefaults());
 
-        // 4. CRITICAL: Disable CSRF protection specifically for the H2 console
-        // This allows the H2 console to make connection POST requests successfully.
-        httpSecurity.csrf(csrf -> csrf.ignoringRequestMatchers("/h2-console/**"));
-
-        // 5. CRITICAL: Allow iframes from the same origin
-        // This switches headers from 'DENY' to 'SAMEORIGIN' so the H2 console UI can render its frames.
-        httpSecurity.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
-
-        // Finalize, compile, and return the configured security filter chain object
+        // Compiles all the structural rules configured above and returns the finalized chain.
         return httpSecurity.build();
     }
 
     /**
-     * Defines the PasswordEncoder Bean using the BCrypt hashing algorithm.
-     * * WHY BCRYPT?
-     * BCrypt is a secure, one-way cryptographic hash function. It automatically incorporates
-     * a random "salt" for each password encryption, protecting against Rainbow Table attacks.
-     * * HOW SPRING SECURITY USES IT:
-     * When a user logs in, Spring Security takes the raw password input, hashes it using
-     * this bean, and compares that generated hash with the stored hash.
+     * ==============================================================================
+     * 2. THE CRYPTOGRAPHIC PASSING ENCODER (THE CRYPTO ENGINE)
+     * ==============================================================================
+     * Defines how user credentials will be scrambled and verified.
+     * * Return Type: We return the generic interface 'PasswordEncoder'. This ensures
+     * seamless loose-coupling when injecting this bean into services (like UserServiceImpl)
+     * that require a generic 'PasswordEncoder'.
+     * * BCrypt: A secure, industry-standard cryptographic hashing algorithm. It is a
+     * one-way slow hashing mechanism that automatically adds a random 'salt' value to
+     * each password, neutralizing pre-computed lookups (like rainbow table attacks).
      */
     @Bean
-    public BCryptPasswordEncoder bCryptPasswordEncoder() {
+    public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
     /**
-     * Configures an in-memory user repository.
-     * * DEPENDENCY INJECTION:
-     * Spring automatically injects the `bCryptPasswordEncoder` bean defined above into the
-     * `encoder` parameter.
-     * * WHAT IS INMEMORYUSERDETAILSMANAGER?
-     * It is an implementation of `UserDetailsService` and `UserDetailsManager`. It stores
-     * user credentials directly in the server's RAM memory. Great for testing, prototyping,
-     * or quick setups, but not meant for dynamic production environments where database persistence is needed.
+     * ==============================================================================
+     * 3. IN-MEMORY USER CREDITENTIAL REGISTRY (THE DATA STORE)
+     * ==============================================================================
+     * Creates an instance of InMemoryUserDetailsManager which implements UserDetailsService.
+     * This acts as a localized mock database inside the computer's volatile RAM.
+     * * Dependency Injection: Spring automatically scans its bean registry, discovers our
+     * 'passwordEncoder()' bean above, and injects it into the 'encoder' parameter below.
      */
     @Bean
-    public InMemoryUserDetailsManager inMemoryUserDetailsManager(BCryptPasswordEncoder encoder) {
+    public InMemoryUserDetailsManager inMemoryUserDetailsManager(PasswordEncoder encoder) {
+
+        // User.builder() constructs an immutable UserDetails model.
+        // encoder.encode("rawPassword") translates plain text into a hashed string
+        // (e.g., "uma@123" becomes something like "$2a$10$eXpAmPlEhAsH...")
 
         // -------------------------------------------------------------------------
-        // User 1: "uma"
+        // Registered Profile 1: "uma"
         // -------------------------------------------------------------------------
         UserDetails u1 = User.builder()
-                .username("uma") // Sets the unique login identifier
-
-                // encoder.encode() converts the plain text "uma@123" into a BCrypt hash string.
-                // The stored password will look something like: $2a$10$eXpAmPlEhAsH...
+                .username("uma")
                 .password(encoder.encode("uma@123"))
-
-                // Assigns the 'USER' role. Under the hood, Spring Security prefixes this
-                // to create an GrantedAuthority named "ROLE_USER".
-                .roles("USER")
-
-                // disabled(false) explicitly states the account is active.
-                // If set to true, authentication attempts will fail with a DisabledException.
-                .disabled(false)
-                .build(); // Validates properties and compiles into an immutable UserDetails object
+                .roles("USER") // Automatically maps to the GrantedAuthority structure "ROLE_USER"
+                .disabled(false) // Account is fully active
+                .build();
 
         // -------------------------------------------------------------------------
-        // User 2: "raju"
+        // Registered Profile 2: "raju"
         // -------------------------------------------------------------------------
         UserDetails u2 = User.builder()
                 .username("raju")
@@ -117,7 +136,7 @@ public class AppConfig {
                 .build();
 
         // -------------------------------------------------------------------------
-        // User 3: "john"
+        // Registered Profile 3: "john"
         // -------------------------------------------------------------------------
         UserDetails u3 = User.builder()
                 .username("john")
@@ -126,20 +145,7 @@ public class AppConfig {
                 .disabled(false)
                 .build();
 
-        // Initializes the memory-based registry containing our pre-defined collection of users
+        // Feeds the user credentials directly into Spring's active runtime memory layer
         return new InMemoryUserDetailsManager(u1, u2, u3);
-    }
-
-    @Bean
-    public ServletRegistrationBean<JakartaWebServlet> h2ConsoleServletRegistration() {
-        // 1. Instantiates H2's web console engine (JakartaWebServlet)
-        // 2. Binds it directly to the URL pathway "/h2-console/*" inside Tomcat
-        ServletRegistrationBean<JakartaWebServlet> registration =
-                new ServletRegistrationBean<>(new JakartaWebServlet(), "/h2-console/*");
-
-        // 3. Names the servlet instance so Spring MVC doesn't confuse it with other controllers
-        registration.setName("h2-console");
-
-        return registration;
     }
 }
