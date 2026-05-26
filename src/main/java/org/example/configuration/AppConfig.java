@@ -13,7 +13,6 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -129,7 +128,7 @@ public class AppConfig {
      * 'passwordEncoder()' bean above, and injects it into the 'encoder' parameter below.
      */
     @Bean
-    public InMemoryUserDetailsManager inMemoryUserDetailsManager(PasswordEncoder encoder) {
+    public InMemoryUserDetailsManager inMemoryUserDetailsManager(BCryptPasswordEncoder encoder) {
 
         // User.builder() constructs an immutable UserDetails model.
         // encoder.encode("rawPassword") translates plain text into a hashed string
