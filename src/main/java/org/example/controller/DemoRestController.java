@@ -13,9 +13,4 @@ public class DemoRestController {
     public String getMessage() {
         return "Welcome Uma!!";
     }
-
-    @GetMapping(value = "/contact")
-    public String getContact() {
-        return "7382046653";
-    }
 }
